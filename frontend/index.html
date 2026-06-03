@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Balloon Flight Planner</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:        #ffffff;
+    --soft:      #f6f8fa;
+    --soft-2:    #eef1f5;
+    --line:      #e3e7ec;
+    --line-2:    #eef1f5;
+    --ink:       #1b2733;
+    --muted:     #5d6b79;
+    --dim:       #99a4b0;
+    --accent:    #2266cc;
+    --accent-hi: #1a4fa0;
+    --plan:      #1a7f3c;
+    --plan-hi:   #166834;
+    --st-active: #e00000;
+    --st-hx:     #f08000;
+    --st-ctl:    #2266cc;
+    --st-off:    #888888;
+    --st-notam:  #8e44ad;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font-family: "IBM Plex Sans", sans-serif; font-size: 14px; line-height: 1.5;
+         -webkit-font-smoothing: antialiased; }
+  .mono { font-family: "IBM Plex Mono", monospace; }
+  #app { display: flex; height: 100vh; }
+
+  /* map */
+  #map { flex: 1 1 60%; background: #dfe6ec; }
+  .leaflet-popup-content { font-family: "IBM Plex Mono", monospace; font-size: 12px; line-height: 1.55; }
+  .leaflet-popup-content b { font-family: "IBM Plex Sans"; color: var(--accent-hi); }
+  .tk-ring { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--accent);
+             box-shadow: 0 0 0 4px rgba(34,102,204,.2); position: relative;
+             animation: pulse 2.4s ease-out infinite; }
+  .tk-ring::after { content:""; position:absolute; inset:6px; border-radius:50%; background: var(--accent); }
+  @keyframes pulse { 0%{box-shadow:0 0 0 3px rgba(34,102,204,.3)} 70%{box-shadow:0 0 0 11px rgba(34,102,204,0)} 100%{box-shadow:0 0 0 3px rgba(34,102,204,0)} }
+
+  /* side panel */
+  #side { flex: 0 0 40%; max-width: 580px; overflow-y: auto; position: relative;
+          padding: 0 22px 40px; border-left: 1px solid var(--line); background: var(--bg); }
+  #side::-webkit-scrollbar { width: 9px; }
+  #side::-webkit-scrollbar-thumb { background: #d3dae1; border-radius: 9px; }
+
+  header { position: sticky; top: 0; z-index: 5; padding: 20px 0 14px;
+           background: linear-gradient(var(--bg) 75%, transparent); border-bottom: 1px solid var(--line); }
+  .kicker { font-family:"IBM Plex Mono"; font-size: 10.5px; letter-spacing: .32em;
+            color: var(--accent); text-transform: uppercase; }
+  h1 { font-size: 23px; font-weight: 700; letter-spacing: -.01em; margin: 3px 0 4px; line-height: 1.05; }
+  h1 .swiss { color: var(--accent); }
+  .sub { color: var(--muted); font-size: 12px; max-width: 46ch; }
+
+  .reveal { opacity: 0; transform: translateY(8px); animation: rise .55s cubic-bezier(.2,.7,.3,1) forwards; }
+  @keyframes rise { to { opacity: 1; transform: none; } }
+
+  .controls { display: flex; flex-direction: column; gap: 10px; margin: 16px 0 12px; }
+  .toggle { display: inline-flex; padding: 3px; gap: 3px; background: var(--soft);
+            border: 1px solid var(--line); border-radius: 9px; width: fit-content; }
+  .toggle button { font: 500 12.5px "IBM Plex Mono"; letter-spacing: .12em; text-transform: uppercase;
+                   padding: 7px 18px; border: 0; border-radius: 7px; cursor: pointer;
+                   background: transparent; color: var(--muted); transition: .18s; }
+  .toggle button:hover { color: var(--ink); }
+  .toggle button.on { background: var(--accent); color: #fff; box-shadow: 0 2px 8px rgba(34,102,204,.3); }
+
+  textarea { width: 100%; padding: 11px 12px; resize: vertical; min-height: 60px;
+             background: #fff; border: 1px solid var(--line); border-radius: 8px;
+             color: var(--ink); font: 400 13px "IBM Plex Sans"; transition: border-color .18s; }
+  textarea::placeholder { color: var(--dim); }
+  textarea:focus { outline: none; border-color: var(--accent); }
+
+  #plan { align-self: flex-start; padding: 10px 22px; border: 0; border-radius: 8px; cursor: pointer;
+          font: 600 13px "IBM Plex Mono"; letter-spacing: .1em; text-transform: uppercase;
+          color: #fff; background: var(--plan); box-shadow: 0 3px 12px rgba(26,127,60,.28);
+          transition: transform .12s, box-shadow .18s, background .18s; }
+  #plan:hover:not(:disabled) { background: var(--plan-hi); transform: translateY(-1px); box-shadow: 0 6px 18px rgba(26,127,60,.36); }
+  #plan:active:not(:disabled) { transform: translateY(0); }
+  #plan:disabled { background: #c2cad2; color: #fff; box-shadow: none; cursor: default; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-bottom: 6px; }
+  .legend span { font-family:"IBM Plex Mono"; font-size: 10.5px; color: var(--muted); }
+  .sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+
+  #warning { display: none; margin: 12px 0; padding: 10px 12px 10px 14px; border-radius: 7px;
+             font-size: 12.5px; line-height: 1.5; color: #7a5600;
+             background: #fdf2d0; border: 1px solid #e3c558; border-left: 4px solid var(--st-hx); }
+  #warning::before { content: "CAUTION"; display:block; font:600 10px "IBM Plex Mono";
+                     letter-spacing: .22em; color: #b8860b; margin-bottom: 3px; }
+
+  .panel { margin-top: 22px; }
+  .panel > h2 { font: 600 10.5px "IBM Plex Mono"; letter-spacing: .24em; text-transform: uppercase;
+                color: var(--dim); margin: 0 0 10px; display: flex; align-items: center; gap: 10px; }
+  .panel > h2::after { content:""; flex: 1; height: 1px; background: var(--line); }
+  .panel .sub { margin: -6px 0 10px; }
+
+  #answer { font-size: 13.5px; color: #34424f; }
+  #answer.hint { color: var(--dim); font-style: italic; }
+  #answer h3 { font: 600 13px "IBM Plex Mono"; letter-spacing: .03em; color: var(--accent-hi);
+               margin: 16px 0 6px; padding-bottom: 4px; border-bottom: 1px solid var(--line-2); }
+  #answer strong { color: var(--ink); font-weight: 600; }
+  #answer p, #answer li { margin: 5px 0; }
+  #answer ul { padding-left: 18px; }
+  #answer hr { border: 0; border-top: 1px solid var(--line); margin: 14px 0; }
+  .cite { font-family:"IBM Plex Mono"; font-size: 11.5px; color: var(--accent);
+          background: #e8f0fb; border: 1px solid #cfe0f7; padding: 0 5px; border-radius: 4px; white-space: nowrap; }
+
+  #sources { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+  #sources li { font: 500 11px "IBM Plex Mono"; color: var(--muted);
+                background: var(--soft); border: 1px solid var(--line); border-radius: 5px; padding: 3px 8px; }
+  #sources li b { color: var(--accent-hi); font-weight: 500; }
+
+  #ctxlist { display: flex; flex-direction: column; gap: 5px; }
+  .strip { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: baseline;
+           padding: 8px 11px; border-radius: 7px; cursor: pointer; background: var(--soft);
+           border: 1px solid var(--line); border-left: 3px solid var(--st-off);
+           transition: background .15s, transform .15s; }
+  .strip:hover { background: var(--soft-2); transform: translateX(2px); }
+  .strip .code { font: 600 11px "IBM Plex Mono"; letter-spacing: .06em; color: var(--accent-hi); }
+  .strip .nm { font-weight: 500; color: var(--ink); }
+  .strip .tag { font: 600 9.5px "IBM Plex Mono"; letter-spacing: .1em; text-transform: uppercase;
+                padding: 2px 7px; border-radius: 20px; white-space: nowrap; }
+  .strip .data { grid-column: 1 / -1; font-family:"IBM Plex Mono"; font-size: 11px; color: var(--muted); }
+  .strip .data b { color: #34424f; font-weight: 500; }
+  .t-active { color: #a31212; background: #fde4e4; }
+  .t-hx     { color: #92560a; background: #fdeed5; }
+  .t-off    { color: #566370; background: #eef1f5; }
+  .t-ok     { color: #1a4fa0; background: #e3edfb; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="map"></div>
+  <div id="side">
+    <header>
+      <h1>Balloon Flight Planner</h1>
+      <div class="sub">Click the map to set a takeoff point in the Gros-de-Vaud</div>
+    </header>
+
+    <div class="controls reveal" style="animation-delay:.06s">
+      <div class="toggle" id="toggle">
+        <button data-mode="morning" class="on">Morning</button>
+        <button data-mode="evening">Evening</button>
+      </div>
+      <textarea id="question" rows="2" placeholder="Please indicate any additional parameters for the flight you'd like to plan."></textarea>
+      <button id="plan" disabled>Plan flight</button>
+    </div>
+
+    <div class="legend reveal" style="animation-delay:.12s">
+      <span><i class="sw" style="background:#e00000"></i>active R/D</span>
+      <span><i class="sw" style="background:#f08000"></i>HX</span>
+      <span><i class="sw" style="background:#2266cc"></i>controlled</span>
+      <span><i class="sw" style="background:#888888"></i>inactive</span>
+      <span><i class="sw" style="background:#8e44ad"></i>NOTAM</span>
+    </div>
+
+    <div id="warning"></div>
+
+    <div class="panel reveal" style="animation-delay:.18s">
+      <h2>Flight Options</h2>
+      <div id="answer" class="hint">Set a takeoff point and click “Plan flight”.</div>
+    </div>
+
+    <div class="panel reveal" style="animation-delay:.24s">
+      <h2>Sources</h2>
+      <ul id="sources"></ul>
+    </div>
+
+    <div class="panel reveal" style="animation-delay:.3s">
+      <h2>Reachable Airspace &amp; NOTAMs</h2>
+      <div class="sub">Click an item to locate it on the map.</div>
+      <div id="ctxlist"></div>
+    </div>
+  </div>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
